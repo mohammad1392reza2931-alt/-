@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ممد جاااااااا | بازی‌ساز هوش مصنوعی</title>
+<title>BINDO | بازی‌ساز هوش مصنوعی</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;700&display=swap">
@@ -63,7 +63,7 @@ main { display: grid; grid-template-columns: 380px 1fr; gap: 16px; padding: 16px
 <body>
 
 <header>
-  <div class="logo">🎮 بازی‌ساز ممد جاااااااا</div>
+  <div class="logo">🎮 بازی‌ساز BINDO</div>
   <span><button class="hbtn" onclick="clearKey();alert('کلید پاک شد')">🔑 پاک کردن کلید</button> <button class="hbtn" onclick="resetChat()">🗑 پاک کردن گفتگو</button></span>
 </header>
 
@@ -77,7 +77,7 @@ main { display: grid; grid-template-columns: 380px 1fr; gap: 16px; padding: 16px
       </select>
     </div>
     <div id="msgs">
-      <div class="msg-b bot">سلام ممد جون! 😎 بازی‌ای که می‌خوای رو توصیف کن. مثلاً:
+      <div class="msg-b bot">سلام BINDO! 😎 بازی‌ای که می‌خوای رو توصیف کن. مثلاً:
 «یه بازی مار به سبک نوکیا با دکمه‌های لمسی»
 بعد از ساخت هم می‌تونی بگی «همونو سخت‌تر کن» — چون کل گفتگو رو یادشه! 🧠🚀</div>
     </div>
@@ -88,7 +88,7 @@ main { display: grid; grid-template-columns: 380px 1fr; gap: 16px; padding: 16px
         <button id="attachBtn" type="button" onclick="document.getElementById('imgInput').click()">🖼️ افزودن تصویر</button>
         <input type="file" id="imgInput" accept="image/*" multiple style="display:none" onchange="onPickImages(this)">
       </div>
-      <button id="build" type="button" onclick="buildGame()">🤖 بسازش ممد!</button>
+      <button id="build" type="button" onclick="buildGame()">🤖 بسازش BINDO!</button>
     </div>
   </section>
 
@@ -120,7 +120,7 @@ function getKey() {
   try { k = localStorage.getItem("gap_key") || ""; } catch (e) {}
   if (!k) k = memKey;
   if (!k) {
-    k = (prompt("کلید API گپ‌جی‌پی‌تی (sk-...) رو وارد کن:") || "").trim();
+    k = (prompt("کلید API‌ای که از z.ai گرفتید را وارد کنید:") || "").trim();
     if (k) { memKey = k; try { localStorage.setItem("gap_key", k); } catch (e) {} }
   }
   return k;
@@ -130,6 +130,13 @@ function clearKey() {
   try { localStorage.removeItem("gap_key"); } catch (e) {}
 }
 function getModel() { return document.getElementById("modelSel").value; }
+function getModelName(id) {
+  var opts = document.getElementById("modelSel").options;
+  for (var i = 0; i < opts.length; i++) {
+    if (opts[i].value === id) return opts[i].text.replace(/\s*[\(（].*$/, "").trim();
+  }
+  return id;
+}
 /* ============================== */
 
 var SYSTEM = [
@@ -222,7 +229,7 @@ function resetChat() {
   chatHistory = [];
   var box = document.getElementById("msgs");
   box.innerHTML = "";
-  addMsg("گفتگو پاک شد! 🧹 یه بازی جدید توصیف کن ممد جون 😎", "bot");
+  addMsg("گفتگو پاک شد! 🧹 یه بازی جدید توصیف کن BINDO 😎", "bot");
 }
 
 function cleanHistory() {
@@ -254,6 +261,71 @@ function callAPI(messages, model) {
     return res.json();
   });
 }
+
+
+/* ===== صف انتظار ===== */
+var activeTicket = null;
+function qFetch(path, opts) {
+  return fetch(API_URL + path, opts).then(function(r) {
+    if (!r.ok) throw new Error("no-queue");
+    return r.json();
+  }).then(function(j) {
+    if (!j || j.queue !== true) throw new Error("no-queue");
+    return j;
+  });
+}
+function qPost(path, body, keepalive) {
+  return qFetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), keepalive: !!keepalive });
+}
+/* اگه سرور صف نداشته باشه null برمی‌گرده و ساخت مثل قبل مستقیم انجام می‌شه */
+function joinQueue(model) {
+  return qPost("/queue/join", { model: model }).then(function(j) {
+    return { id: j.id, model: model, info: j };
+  }).catch(function() { return null; });
+}
+function leaveQueue(t) {
+  if (!t) return;
+  if (activeTicket === t) activeTicket = null;
+  qPost("/queue/done", { id: t.id, model: t.model }, true).catch(function() {});
+}
+function waitTurn(t, waitMsg, name) {
+  return new Promise(function(resolve, reject) {
+    var lastShown = -2;
+    function show(info) {
+      var n = info.ahead;
+      if (info.ready) { waitMsg.textContent = "⏳ " + name + " داره بازی‌ات رو می‌سازه... ۱ تا ۲ دقیقه صبر کن 🤖"; return; }
+      if (n === lastShown) return;
+      lastShown = n;
+      waitMsg.textContent = "🚦 " + name + " الان شلوغه. " + n + " نفر جلوی تو تو صفن (از مجموع " + info.total + " نفر در صف).\nصبر کن، نوبتت که بشه خودکار شروع می‌شه 🙏";
+    }
+    function tick(info) {
+      show(info);
+      if (info.ready) return resolve();
+      setTimeout(poll, 2000);
+    }
+    function poll() {
+      if (activeTicket !== t) return reject(new Error("صف لغو شد."));
+      qFetch("/queue/status?model=" + encodeURIComponent(t.model) + "&id=" + encodeURIComponent(t.id))
+        .then(tick)
+        .catch(function(e) {
+          if (e && e.message === "no-queue") return resolve();
+          setTimeout(poll, 3000);
+        });
+    }
+    activeTicket = t;
+    tick(t.info);
+  });
+}
+function queuedCall(messages, model, waitMsg, name) {
+  return joinQueue(model).then(function(t) {
+    if (!t) return callAPI(messages, model);
+    return waitTurn(t, waitMsg, name)
+      .then(function() { return callAPI(messages, model); })
+      .then(function(d) { leaveQueue(t); return d; }, function(e) { leaveQueue(t); throw e; });
+  });
+}
+window.addEventListener("pagehide", function() { if (activeTicket) leaveQueue(activeTicket); });
+/* ============================== */
 
 function handleResult(data, idea, nImgs) {
   if (nImgs) idea = idea + "\n[" + nImgs + " تصویر پیوست شده بود]";
@@ -289,7 +361,7 @@ function buildGame() {
   var idea = ideaEl.value.trim();
   var imgs = pendingImages.slice();
   if (!idea && imgs.length) idea = "این تصویر(ها) رو ببین و بر اساسش بازی رو بساز/تغییر بده.";
-  if (!idea) { addMsg("اول بازی‌ات رو توصیف کن ممد جون! 😄", "bot"); return; }
+  if (!idea) { addMsg("اول بازی‌ات رو توصیف کن BINDO! 😄", "bot"); return; }
 
   addUserMsg(idea, imgs);
   ideaEl.value = "";
@@ -297,13 +369,13 @@ function buildGame() {
 
   var btn = document.getElementById("build");
   btn.disabled = true; btn.textContent = "⏳ در حال ساخت...";
-  var waitMsg = addMsg("⏳ Claude داره بازی‌ات رو می‌سازه... ۱ تا ۲ دقیقه صبر کن 🤖", "bot");
+  var useModel = imgs.length ? "glm-4.6v-flash" : getModel();
+  var waitMsg = addMsg("⏳ " + getModelName(useModel) + " داره بازی‌ات رو می‌سازه... ۱ تا ۲ دقیقه صبر کن 🤖", "bot");
 
   var messages = [{ role: "system", content: SYSTEM }].concat(cleanHistory());
   messages.push({ role: "user", content: buildContent(idea, imgs) });
 
-  var useModel = imgs.length ? "glm-4.6v-flash" : getModel();
-  callAPI(messages, useModel)
+  queuedCall(messages, useModel, waitMsg, getModelName(useModel))
   .then(function(data) {
     waitMsg.remove();
     handleResult(data, idea, imgs.length);
@@ -321,7 +393,7 @@ function buildGame() {
       return;
     }
     if (msg.indexOf("429") !== -1 || msg.indexOf("1305") !== -1 || msg.indexOf("overloaded") !== -1) {
-      addMsg("⏳ سرویس هوش مصنوعی الان خیلی شلوغه و جواب نمی‌ده. مشکل از سایت ما نیست و کلیدت هم درسته. یکی دو دقیقه صبر کن و دوباره «بسازش ممد!» رو بزن 🙏", "bot");
+      addMsg("⏳ سرویس هوش مصنوعی الان خیلی شلوغه و جواب نمی‌ده. مشکل از سایت ما نیست و کلیدت هم درسته. یکی دو دقیقه صبر کن و دوباره «بسازش BINDO!» رو بزن 🙏", "bot");
       return;
     }
     if (msg.indexOf("401") !== -1) { clearKey(); msg += "\n\n🔑 کلید نامعتبره؛ دفعه‌ی بعد دوباره ازت می‌پرسم."; }
@@ -340,7 +412,7 @@ function buildGame() {
     }
   })
   .finally(function() {
-    btn.disabled = false; btn.textContent = "🤖 بسازش ممد!";
+    btn.disabled = false; btn.textContent = "🤖 بسازش BINDO!";
   });
 }
 
