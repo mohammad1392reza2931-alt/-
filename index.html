@@ -251,15 +251,51 @@ function callAPI(messages, model) {
   return fetch(API_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json", "Authorization": "Bearer " + key },
-    body: JSON.stringify({ model: model || getModel(), messages: messages, max_tokens: 16000 })
+    body: JSON.stringify({ model: model || getModel(), messages: messages, max_tokens: 16000, stream: true })
   }).then(function(res) {
     if (!res.ok) {
       return res.text().then(function(t) {
         throw new Error("خطای سرور " + res.status + ":\n" + t.slice(0, 300));
       });
     }
-    return res.json();
+    var ct = (res.headers.get("content-type") || "");
+    if (ct.indexOf("text/event-stream") === -1 || !res.body || !res.body.getReader) return res.json();
+    return readStream(res);
   });
+}
+
+/* خواندن جواب به‌صورت جریانی تا اتصال وسط راه قطع نشه (خطای 524) */
+function readStream(res) {
+  var reader = res.body.getReader();
+  var dec = new TextDecoder("utf-8");
+  var buf = "", content = "", finish = null;
+  function handleLine(line) {
+    line = line.trim();
+    if (line.indexOf("data:") !== 0) return;
+    var d = line.slice(5).trim();
+    if (!d || d === "[DONE]") return;
+    var j;
+    try { j = JSON.parse(d); } catch (e) { return; }
+    if (j.error) throw new Error("خطای سرور:\n" + JSON.stringify(j.error).slice(0, 300));
+    var c = j.choices && j.choices[0];
+    if (!c) return;
+    if (c.delta && c.delta.content) content += c.delta.content;
+    if (c.finish_reason) finish = c.finish_reason;
+  }
+  function pump() {
+    return reader.read().then(function(r) {
+      if (r.done) {
+        if (buf) handleLine(buf);
+        return { choices: [{ message: { content: content }, finish_reason: finish }] };
+      }
+      buf += dec.decode(r.value, { stream: true });
+      var lines = buf.split("\n");
+      buf = lines.pop();
+      lines.forEach(handleLine);
+      return pump();
+    });
+  }
+  return pump();
 }
 
 
@@ -394,6 +430,10 @@ function buildGame() {
     }
     if (msg.indexOf("429") !== -1 || msg.indexOf("1305") !== -1 || msg.indexOf("overloaded") !== -1) {
       addMsg("⏳ سرویس هوش مصنوعی الان خیلی شلوغه و جواب نمی‌ده. مشکل از سایت ما نیست و کلیدت هم درسته. یکی دو دقیقه صبر کن و دوباره «بسازش BINDO!» رو بزن 🙏", "bot");
+      return;
+    }
+    if (msg.indexOf("524") !== -1 || msg.indexOf("504") !== -1 || msg.indexOf("timeout") !== -1) {
+      addMsg("⌛ سرور بیش از حد طول کشید و قطع شد (خطای 524). بازی‌های سنگین یا همراه با تصویر زمان بیشتری می‌برن. دوباره امتحان کن، یا توضیح بازی رو ساده‌تر کن.", "bot");
       return;
     }
     if (msg.indexOf("401") !== -1) { clearKey(); msg += "\n\n🔑 کلید نامعتبره؛ دفعه‌ی بعد دوباره ازت می‌پرسم."; }
