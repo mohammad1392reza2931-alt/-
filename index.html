@@ -4,7 +4,10 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ممد جاااااااا | بازی‌ساز هوش مصنوعی</title>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.0.3/Vazirmatn-font-face.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;700&display=swap">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/vazirmatn@33.0.3/Vazirmatn-font-face.css">
 <style>
 @font-face {
   font-family: "Vazir";
@@ -136,7 +139,7 @@ var SYSTEM = [
   "- اگر کاربر روی بازی قبلی تغییری خواست، نسخه قبلی را از تاریخچه گفتگو بگیر، تغییرات را روی همان اعمال کن و کل نسخه جدید را کامل برگردان.",
   "- هیچ توضیح اضافه یا بلوک کد (سه بک‌تیک) ننویس؛ خروجی باید دقیقاً از <html شروع شود و با </html> تمام شود.",
   "- بازی باید فارسی، راست‌چین، با رنگ‌بندی تیره و لهجه نارنجی (#ff7a18) باشد.",
-  "- فونت تمام متن‌های بازی باید وزیر باشد: داخل head این را بگذار <link rel=\"stylesheet\" href=\"https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.0.3/Vazirmatn-font-face.css\"> و در CSS بنویس font-family: Vazirmatn, Tahoma, sans-serif (روی دکمه‌ها و canvas text هم همین فونت را اعمال کن).",
+  "- فونت تمام متن‌های بازی باید وزیر باشد: داخل head این را بگذار <link rel=\"stylesheet\" href=\"https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;700&display=swap\"> و در CSS بنویس font-family: Vazirmatn, Tahoma, sans-serif (روی دکمه‌ها و canvas text هم همین فونت را اعمال کن).",
   "- بازی باید امتیاز داشته باشد، کنترل واضح (کیبورد + لمسی) داشته باشد، صدا/انیمیشن ساده داشته باشد و روی موبایل هم عالی کار کند.",
   "- کیفیت کد بالا: بدون باگ، بدون خطای کنسول، فیزیک و گیم‌پلی روان."
 ].join("\n");
@@ -315,6 +318,10 @@ function buildGame() {
     }
     if (msg.indexOf("Failed to fetch") !== -1 || msg.indexOf("NetworkError") !== -1 || msg.indexOf("Load failed") !== -1) {
       addMsg("🌐 درخواست اصلاً به سرور نرسید. دلیلش یکی از اینهاست: اینترنت/فیلترینگ (VPN رو روشن یا خاموش کن)، دامنه سرویس برات بسته‌ست، یا سرور اجازه‌ی درخواست از داخل مرورگر (CORS) نمی‌ده.", "bot");
+      return;
+    }
+    if (msg.indexOf("429") !== -1 || msg.indexOf("1305") !== -1 || msg.indexOf("overloaded") !== -1) {
+      addMsg("⏳ سرویس هوش مصنوعی الان خیلی شلوغه و جواب نمی‌ده. مشکل از سایت ما نیست و کلیدت هم درسته. یکی دو دقیقه صبر کن و دوباره «بسازش ممد!» رو بزن 🙏", "bot");
       return;
     }
     if (msg.indexOf("401") !== -1) { clearKey(); msg += "\n\n🔑 کلید نامعتبره؛ دفعه‌ی بعد دوباره ازت می‌پرسم."; }
