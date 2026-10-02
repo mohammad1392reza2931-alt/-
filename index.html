@@ -112,7 +112,7 @@ window.onerror = function(msg, src, line) {
 
 /* ===== تنظیمات هوش مصنوعی ===== */
 var API_URL = "https://worker.mohammad1392reza2931.workers.dev";
-var CF_URL = "https://white-voice-72bd.mohammad1392reza2931.workers.dev";
+var CF_URL = API_URL; /* همون ورکر واحد */
 function isCF(model) { return String(model || "").indexOf("@cf/") === 0; }
 /* 🔑 کلید جدیدت رو بین دو تا کوتیشن بذار (مثلاً "sk-..."). اگه خالی بمونه، صفحه ازت می‌پرسه. */
 var API_KEY = "";
@@ -250,7 +250,7 @@ function cleanHistory() {
   return clean;
 }
 
-function callAPI(messages, model) {
+function callAPI(messages, model, onProgress) {
   var cf = isCF(model || getModel());
   var key = cf ? "" : getKey();
   if (!cf && !key) return Promise.reject(new Error("کلید API وارد نشد."));
@@ -273,15 +273,19 @@ function callAPI(messages, model) {
     }
     var ct = (res.headers.get("content-type") || "");
     if (ct.indexOf("text/event-stream") === -1 || !res.body || !res.body.getReader) return res.json();
-    return readStream(res);
+    return readStream(res, onProgress);
   });
 }
 
 /* خواندن جواب به‌صورت جریانی تا اتصال وسط راه قطع نشه (خطای 524) */
-function readStream(res) {
+function readStream(res, onProgress) {
   var reader = res.body.getReader();
   var dec = new TextDecoder("utf-8");
-  var buf = "", content = "", finish = null;
+  var buf = "", content = "", finish = null, thinking = 0, lastTick = 0;
+  function report() {
+    var now = Date.now();
+    if (onProgress && now - lastTick > 400) { lastTick = now; onProgress(content.length, thinking); }
+  }
   function handleLine(line) {
     line = line.trim();
     if (line.indexOf("data:") !== 0) return;
@@ -293,12 +297,23 @@ function readStream(res) {
     var c = j.choices && j.choices[0];
     if (!c) return;
     if (c.delta && c.delta.content) content += c.delta.content;
+    if (c.delta && c.delta.reasoning_content) thinking += c.delta.reasoning_content.length;
     if (c.finish_reason) finish = c.finish_reason;
+    report();
+  }
+  /* اگه مدت زیادی هیچ داده‌ای نیومد، به‌جای انتظار بی‌نهایت قطع می‌کنیم */
+  function readWithTimeout() {
+    var limit = (content.length || thinking) ? 60000 : 120000;
+    return new Promise(function(resolve, reject) {
+      var t = setTimeout(function() { try { reader.cancel(); } catch (e) {} reject(new Error("STALL")); }, limit);
+      reader.read().then(function(r) { clearTimeout(t); resolve(r); }, function(e) { clearTimeout(t); reject(e); });
+    });
   }
   function pump() {
-    return reader.read().then(function(r) {
+    return readWithTimeout().then(function(r) {
       if (r.done) {
         if (buf) handleLine(buf);
+        if (!content) throw new Error("EMPTY");
         return { choices: [{ message: { content: content }, finish_reason: finish }] };
       }
       buf += dec.decode(r.value, { stream: true });
@@ -310,7 +325,6 @@ function readStream(res) {
   }
   return pump();
 }
-
 
 /* ===== صف انتظار ===== */
 var activeTicket = null;
@@ -366,11 +380,16 @@ function waitTurn(t, waitMsg, name) {
   });
 }
 function queuedCall(messages, model, waitMsg, name) {
-  if (isCF(model)) return callAPI(messages, model);
+  function progress(chars, thinking) {
+    waitMsg.textContent = chars
+      ? "✍️ " + name + " داره بازی رو می‌نویسه... (" + chars + " کاراکتر نوشته شده)\nتا وقتی این عدد بالا می‌ره یعنی داره کار می‌کنه 👍"
+      : "🧠 " + name + " داره فکر می‌کنه...\nیه کم صبر کن.";
+  }
+  if (isCF(model)) return callAPI(messages, model, progress);
   return joinQueue(model).then(function(t) {
-    if (!t) return callAPI(messages, model);
+    if (!t) return callAPI(messages, model, progress);
     return waitTurn(t, waitMsg, name)
-      .then(function() { return callAPI(messages, model); })
+      .then(function() { return callAPI(messages, model, progress); })
       .then(function(d) { leaveQueue(t); return d; }, function(e) { leaveQueue(t); throw e; });
   });
 }
@@ -386,7 +405,9 @@ function handleResult(data, idea, nImgs) {
   var raw = (data.choices[0].message.content || "") + "";
   var code = raw;
   var m = code.match(/<!DOCTYPE[\s\S]*<\/html>|<html[\s\S]*<\/html>/i);
+  var htmlStart = raw.search(/<!DOCTYPE|<html/i);
   if (m) code = m[0];
+  else if (htmlStart > 0) code = raw.slice(htmlStart);
 
   if (code.toLowerCase().indexOf("<html") === -1) {
     if (raw.trim() !== "") addMsg("🤖 " + raw.slice(0, 500), "bot");
@@ -403,8 +424,9 @@ function handleResult(data, idea, nImgs) {
   document.getElementById("gameFrame").srcdoc = code;
   document.getElementById("status").textContent = "🎮 بازی آماده‌ست! بازی کن!";
   document.getElementById("dlBtn").style.display = "inline-block";
-  var say = (m ? raw.slice(0, m.index) : "").replace(/```[a-zA-Z]*/g, "").trim();
+  var say = (htmlStart > 0 ? raw.slice(0, htmlStart) : "").replace(/```[a-zA-Z]*/g, "").trim();
   if (say.length > 2000) say = say.slice(0, 2000) + "…";
+  if (!m) say = (say ? say + "\n\n" : "") + "⚠️ جواب مدل نیمه‌کاره موند (به سقف طول رسید)، پس بازی احتمالاً درست کار نمی‌کنه. توضیحت رو ساده‌تر کن و دوباره امتحان کن.";
   addMsg(say || "بازیت آماده شد! 🎮 تغییری خواستی فقط بگو — بازی قبلی رو یادشه! 🧠", "bot");
 }
 
@@ -435,6 +457,14 @@ function buildGame() {
   .catch(function(err) {
     waitMsg.remove();
     var msg = String(err && err.message ? err.message : err);
+    if (msg === "STALL") {
+      addMsg("⌛ مدل خیلی وقته هیچ جوابی نمی‌فرسته و قطعش کردم. دوباره امتحان کن، توضیح بازی رو ساده‌تر کن، یا مدل دیگه‌ای انتخاب کن.", "bot");
+      return;
+    }
+    if (msg === "EMPTY") {
+      addMsg("🤷 مدل جواب خالی داد (چیزی ننوشت). دوباره امتحان کن یا مدل دیگه‌ای انتخاب کن.", "bot");
+      return;
+    }
     if (msg.indexOf("CFERR|") === 0) {
       var parts = msg.split("|");
       var code = parts[1], fa = parts.slice(2).join("|");
