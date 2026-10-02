@@ -4,5 +4,13 @@
   "compatibility_date": "2026-09-30",
   "ai": {
     "binding": "AI"
-  }
+  },
+  "durable_objects": {
+    "bindings": [
+      { "name": "QUEUE", "class_name": "QueueDO" }
+    ]
+  },
+  "migrations": [
+    { "tag": "v1-queue", "new_sqlite_classes": ["QueueDO"] }
+  ]
 }

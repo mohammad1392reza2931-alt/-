@@ -93,14 +93,103 @@ async function runCF(body, env) {
   }
 }
 
+
+// ===================== صف انتظار (Durable Object) =====================
+// هر «صف» مخصوص یک مدل است؛ برای مدل‌های z.ai به ازای هر کلید API جدا (چون سقف همزمانی z.ai برای هر کلید جداست).
+const MAX_RUNNING_CF = 2;   // چند نفر همزمان با Qwen بسازن
+const MAX_RUNNING_ZAI = 1;  // چند نفر همزمان با یک کلید z.ai بسازن
+const WAIT_IDLE_MS = 15000; // کسی که توی صفه و ۱۵ ثانیه خبر نده (تب بسته شد) حذف می‌شه
+const RUN_IDLE_MS = 60000;  // کسی که داره می‌سازه و ۱ دقیقه خبر نده حذف می‌شه
+const RUN_HARD_MS = 6 * 60000; // حداکثر زمان یک ساخت
+
+async function sha16(text) {
+  const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(d)).slice(0, 8).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+async function handleQueue(request, env, url) {
+  if (!env.QUEUE) return json({ error: { message: "queue not enabled" } }, 404);
+  let model = url.searchParams.get("model") || "";
+  if (request.method === "POST") {
+    const b = await request.clone().json().catch(() => ({}));
+    model = b.model || model;
+  }
+  model = String(model || "default");
+  const isCf = model.indexOf("@cf/") === 0;
+  const name = isCf ? "cf:" + model : model + ":" + (await sha16(request.headers.get("Authorization") || ""));
+  const fwd = new Request(request);
+  fwd.headers.set("x-max", String(isCf ? MAX_RUNNING_CF : MAX_RUNNING_ZAI));
+  const res = await env.QUEUE.get(env.QUEUE.idFromName(name)).fetch(fwd);
+  return new Response(res.body, { status: res.status, headers: { ...CORS, "Content-Type": "application/json" } });
+}
+
+export class QueueDO {
+  constructor() {
+    this.waiting = []; // {id, seen}
+    this.running = []; // {id, start, seen}
+  }
+  clean(now, max) {
+    this.waiting = this.waiting.filter((t) => now - t.seen < WAIT_IDLE_MS);
+    this.running = this.running.filter((t) => now - t.seen < RUN_IDLE_MS && now - t.start < RUN_HARD_MS);
+    while (this.running.length < max && this.waiting.length) {
+      const t = this.waiting.shift();
+      this.running.push({ id: t.id, start: now, seen: now });
+    }
+  }
+  info(id) {
+    const ready = this.running.some((t) => t.id === id);
+    const idx = this.waiting.findIndex((t) => t.id === id);
+    return {
+      queue: true,
+      id,
+      ready,
+      ahead: ready ? 0 : this.running.length + Math.max(idx, 0),
+      total: this.waiting.length + this.running.length,
+    };
+  }
+  async fetch(request) {
+    const url = new URL(request.url);
+    const now = Date.now();
+    const max = Number(request.headers.get("x-max")) || 1;
+    this.clean(now, max);
+    const out = (o) => new Response(JSON.stringify(o), { headers: { "Content-Type": "application/json" } });
+
+    if (url.pathname === "/queue/join") {
+      const id = crypto.randomUUID();
+      this.waiting.push({ id, seen: now });
+      this.clean(now, max);
+      return out(this.info(id));
+    }
+    if (url.pathname === "/queue/status") {
+      const id = url.searchParams.get("id") || "";
+      const w = this.waiting.find((t) => t.id === id);
+      const r = this.running.find((t) => t.id === id);
+      if (w) w.seen = now;
+      else if (r) r.seen = now;
+      else { // بلیت منقضی یا DO ریست شده → دوباره آخر صف
+        this.waiting.push({ id, seen: now });
+        this.clean(now, max);
+      }
+      return out(this.info(id));
+    }
+    if (url.pathname === "/queue/done") {
+      const b = await request.json().catch(() => ({}));
+      this.waiting = this.waiting.filter((t) => t.id !== b.id);
+      this.running = this.running.filter((t) => t.id !== b.id);
+      this.clean(now, max);
+      return out({ queue: true, ok: true });
+    }
+    return new Response("not found", { status: 404 });
+  }
+}
+// ======================================================================
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     if (request.method === "OPTIONS") return new Response(null, { headers: CORS });
-    if (request.method !== "POST") return json({ ok: true, proxy: "z.ai", cf_models: CF_MODELS });
-
-    // صف انتظار هنوز فعال نیست؛ جواب سریع بده تا درخواست الکی به z.ai نره
-    if (url.pathname.indexOf("/queue/") === 0) return json({ error: { message: "queue not enabled" } }, 404);
+    if (url.pathname.indexOf("/queue/") === 0) return handleQueue(request, env, url);
+    if (request.method !== "POST") return json({ ok: true, proxy: "z.ai", cf_models: CF_MODELS, queue: !!env.QUEUE });
 
     const text = await request.text();
     let body = null;

@@ -328,7 +328,11 @@ function readStream(res, onProgress) {
 
 /* ===== صف انتظار ===== */
 var activeTicket = null;
+var qAuth = "";
 function qFetch(path, opts) {
+  opts = opts || {};
+  opts.headers = opts.headers || {};
+  if (qAuth) opts.headers["Authorization"] = "Bearer " + qAuth;
   return fetch(API_URL + path, opts).then(function(r) {
     if (!r.ok) throw new Error("no-queue");
     return r.json();
@@ -385,12 +389,25 @@ function queuedCall(messages, model, waitMsg, name) {
       ? "✍️ " + name + " داره بازی رو می‌نویسه... (" + chars + " کاراکتر نوشته شده)\nتا وقتی این عدد بالا می‌ره یعنی داره کار می‌کنه 👍"
       : "🧠 " + name + " داره فکر می‌کنه...\nیه کم صبر کن.";
   }
-  if (isCF(model)) return callAPI(messages, model, progress);
+  /* صف z.ai به ازای هر کلید جداست، پس اول کلید رو می‌گیریم */
+  qAuth = "";
+  if (!isCF(model)) {
+    qAuth = getKey();
+    if (!qAuth) return Promise.reject(new Error("کلید API وارد نشد."));
+  }
+  var hb = null;
   return joinQueue(model).then(function(t) {
     if (!t) return callAPI(messages, model, progress);
     return waitTurn(t, waitMsg, name)
-      .then(function() { return callAPI(messages, model, progress); })
-      .then(function(d) { leaveQueue(t); return d; }, function(e) { leaveQueue(t); throw e; });
+      .then(function() {
+        /* هر ۲۰ ثانیه خبر می‌دیم که هنوز زنده‌ایم تا از صف حذف نشیم */
+        hb = setInterval(function() {
+          qFetch("/queue/status?model=" + encodeURIComponent(t.model) + "&id=" + encodeURIComponent(t.id)).catch(function() {});
+        }, 20000);
+        return callAPI(messages, model, progress);
+      })
+      .then(function(d) { clearInterval(hb); leaveQueue(t); return d; },
+            function(e) { clearInterval(hb); leaveQueue(t); throw e; });
   });
 }
 window.addEventListener("pagehide", function() { if (activeTicket) leaveQueue(activeTicket); });
