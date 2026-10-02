@@ -71,6 +71,7 @@ main { display: grid; grid-template-columns: 380px 1fr; gap: 16px; padding: 16px
   <section id="chat">
     <div id="chatHead">🛠️ توصیف بازی‌ات رو بنویس 🧠
       <select id="modelSel" style="margin-top:8px;width:100%;padding:6px;border-radius:8px;border:none;font-family:inherit;font-size:.9rem">
+        <option value="@cf/qwen/qwen2.5-coder-32b-instruct">Qwen 2.5 Coder 32B (رایگان، بدون کلید)</option>
         <option value="glm-4.7-flash">GLM 4.7 Flash (رایگان، متن)</option>
         <option value="glm-4.5-flash">GLM 4.5 Flash (رایگان، متن)</option>
         <option value="glm-4.6v-flash">GLM 4.6V Flash (رایگان، تصویر)</option>
@@ -111,6 +112,8 @@ window.onerror = function(msg, src, line) {
 
 /* ===== تنظیمات هوش مصنوعی ===== */
 var API_URL = "https://worker.mohammad1392reza2931.workers.dev";
+var CF_URL = "https://white-voice-72bd.mohammad1392reza2931.workers.dev";
+function isCF(model) { return String(model || "").indexOf("@cf/") === 0; }
 /* 🔑 کلید جدیدت رو بین دو تا کوتیشن بذار (مثلاً "sk-..."). اگه خالی بمونه، صفحه ازت می‌پرسه. */
 var API_KEY = "";
 var memKey = "";
@@ -246,15 +249,23 @@ function cleanHistory() {
 }
 
 function callAPI(messages, model) {
-  var key = getKey();
-  if (!key) return Promise.reject(new Error("کلید API وارد نشد."));
-  return fetch(API_URL, {
+  var cf = isCF(model || getModel());
+  var key = cf ? "" : getKey();
+  if (!cf && !key) return Promise.reject(new Error("کلید API وارد نشد."));
+  var headers = { "Content-Type": "application/json" };
+  if (!cf) headers["Authorization"] = "Bearer " + key;
+  return fetch(cf ? CF_URL : API_URL, {
     method: "POST",
-    headers: { "Content-Type": "application/json", "Authorization": "Bearer " + key },
+    headers: headers,
     body: JSON.stringify({ model: model || getModel(), messages: messages, max_tokens: 16000, stream: true })
   }).then(function(res) {
     if (!res.ok) {
       return res.text().then(function(t) {
+        if (cf) {
+          var jj = null;
+          try { jj = JSON.parse(t); } catch (e) {}
+          if (jj && jj.error && jj.error.message) throw new Error("CFERR|" + (jj.error.code || "") + "|" + jj.error.message);
+        }
         throw new Error("خطای سرور " + res.status + ":\n" + t.slice(0, 300));
       });
     }
@@ -353,6 +364,7 @@ function waitTurn(t, waitMsg, name) {
   });
 }
 function queuedCall(messages, model, waitMsg, name) {
+  if (isCF(model)) return callAPI(messages, model);
   return joinQueue(model).then(function(t) {
     if (!t) return callAPI(messages, model);
     return waitTurn(t, waitMsg, name)
@@ -419,6 +431,17 @@ function buildGame() {
   .catch(function(err) {
     waitMsg.remove();
     var msg = String(err && err.message ? err.message : err);
+    if (msg.indexOf("CFERR|") === 0) {
+      var parts = msg.split("|");
+      var code = parts[1], fa = parts.slice(2).join("|");
+      if (code === "context") {
+        addMsg("📏 " + fa, "bot");
+        msg = "400"; /* می‌ره سراغ تلاش مجدد بدون حافظه */
+      } else {
+        addMsg("⚠️ " + fa, "bot");
+        return;
+      }
+    }
     if (msg.indexOf("insufficient_quota") !== -1 || msg.indexOf("insufficient_user_quota") !== -1) {
       addMsg("💳 اعتبار حساب API تموم شده. حساب رو شارژ کن یا یه کلید دیگه بذار، یا از لیست بالا مدل ارزان‌تر (مثل GLM 4.7 Flash) انتخاب کن.", "bot");
       addMsg(msg, "err");
